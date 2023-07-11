@@ -49,10 +49,20 @@
 
 ## Version History
 
-* (NEXT)
-- [2023-07-11] Initial check-in, setup script executes 4 out of 7 steps
-- [2023-07-11] Initial check-in, setup script executes 4 out of 7 steps
-    
+* (Version NEXT)
+    - [2023-07-11]
+        - Initial check-in
+        - Setup script simulates happy path file transfer
+
+    - [Not Implemented] Test Reject a task proposal
+    - [Not Implemented] Test Finalizing (i.e. NotifyReceivingComplete seen before NotifySendingComplete)
+    - [Not Implemented] Test Interrupted
+    - [Not Implemented] Test Cancelled
+    - [Not Implemented] Test Error
+    - [Not Implemented] Test Simultaneous Task Proposals are allowed
+    - [Not Implemented] Test accepting more than one Task Proposals is not allowed
+    - [Not Implemented] Test accepting Task Proposal is not allowed while TransferTask is active
+    - [Not Implemented] Test accepting Task Proposal is not allowed while TransferTask is active
     
 ### License
 

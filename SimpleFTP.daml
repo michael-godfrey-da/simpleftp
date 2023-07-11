@@ -41,6 +41,7 @@ template TaskProposal
         filesz_kb : Int
     where 
         signatory originator.user
+        observer counterparty.user
         
         choice Accept : ContractId TransferTask
             controller counterparty.user
@@ -56,7 +57,7 @@ template TaskProposal
                         result = NotComplete
                         result_reason = "(new)"
 
-        choice TaskProposal_Reject : ContractId TransferTask
+        choice Reject : ContractId TransferTask
             with
                 reject_reason : Text
             controller counterparty.user
@@ -72,7 +73,7 @@ template TaskProposal
                         result = Rejected
                         result_reason = reject_reason
 
-        choice TaskProposal_Cancel : ContractId TransferTask
+        choice Cancel : ContractId TransferTask
             with
                 cancel_reason : Text
             controller originator.user
@@ -100,6 +101,7 @@ template TransferTask
         result_reason : Text
     where
         signatory send_client.user
+        observer recv_client.user
         choice Listen : ContractId TransferTask
             controller recv_client.user
             do
@@ -168,8 +170,6 @@ setup = script do
     debug "..................................."
     debug ""
     debug ""
-    -- FIXME: Hardcoding parties (i.e. no dynamic peer discovery) 
-    -- (*[BLAHBLAHBLAH])
     peers <- queryFilter @Client [party_a, party_b, party_c] (const True)
     debug peers
 
@@ -189,7 +189,6 @@ setup = script do
                 Some clientB -> do
                     case clientC of
                         Some clientC -> do
-
                             debug clientA
                             debug clientB
                             debug clientC
@@ -209,6 +208,51 @@ setup = script do
                                     counterparty = clientC
                                     filename = "filename"
                                     filesz_kb = 144
+
+                            debug "==================================="
+                            debug "[SETUP] Step 4:"
+                            debug "-----------------------------------"
+                            debug "Rejecting One Task Proposal, Accepting the Other"
+                            debug "'Accept' creates a new TransferTask"
+                            debug "..................................."
+                            debug ""
+                            debug ""
+                            transfer_task <- submit party_b do exerciseCmd task_proposal_ab Accept
+
+                            debug "==================================="
+                            debug "[SETUP] Step 5:"
+                            debug "-----------------------------------"
+                            debug "Notify TransferTask Listening and Initialized"
+                            debug ""
+                            debug "..................................."
+                            debug ""
+                            debug ""
+                            transfer_task <- submit party_b do exerciseCmd transfer_task Listen
+                            transfer_task <- submit party_a do exerciseCmd transfer_task Initialize
+
+                            debug "==================================="
+                            debug "[SETUP] Step 6:"
+                            debug "-----------------------------------"
+                            debug "Notify TransferTask Sending and Receiving"
+                            debug ""
+                            debug "..................................."
+                            debug ""
+                            debug ""
+                            transfer_task <- submit party_a do exerciseCmd transfer_task NotifySending
+                            transfer_task <- submit party_b do exerciseCmd transfer_task NotifyReceiving
+
+
+                            debug "==================================="
+                            debug "[SETUP] Step 7:"
+                            debug "-----------------------------------"
+                            debug "Record TransferTask Sending and Receiving"
+                            debug "    completion status"
+                            debug "..................................."
+                            debug ""
+                            debug ""
+                            transfer_task <- submit party_a do exerciseCmd transfer_task NotifySendingComplete
+                            transfer_task <- submit party_b do exerciseCmd transfer_task NotifyReceivingComplete
+
                             pure()
                         None -> do
                             error "bad news"
@@ -216,66 +260,4 @@ setup = script do
                     error "bad news"
         None -> do
             error "bad news"
-
-    debug "==================================="
-    debug "[SETUP] Step 4:"
-    debug "-----------------------------------"
-    debug "Rejecting One Task Proposal, Accepting the Other"
-    debug "'Accept' creates a new TransferTask"
-    debug "..................................."
-    debug ""
-    debug ""
-
-    debug "==================================="
-    debug "[SETUP] Step 5:"
-    debug "-----------------------------------"
-    debug "Notify TransferTask Listening and Initialized"
-    debug ""
-    debug "..................................."
-    debug ""
-    debug ""
-
-    debug "==================================="
-    debug "[SETUP] Step 6:"
-    debug "-----------------------------------"
-    debug "Notify TransferTask Sending and Receiving"
-    debug ""
-    debug "..................................."
-    debug ""
-    debug ""
-
-
-    debug "==================================="
-    debug "[SETUP] Step 7:"
-    debug "-----------------------------------"
-    debug "Record TransferTask Sending and Receiving"
-    debug "    completion status"
-    debug "..................................."
-    debug ""
-    debug ""
-
     pure()
-
--- *[BLAHBLAHBLAH]
--- 
--- TODO: Will need to exchange contract keys for client0
--- TODO: Select an easy to reproduce contract key
--- 
--- Rationale (Leaning on ChatGPT way too much):
--- ____
--- The query function requires the party on which the contracts 
--- are visible to be explicitly provided. However, in your case,
--- you want to perform discovery by querying for all peers from 
--- ClientA, which means you do not know the complete set of 
--- parties ahead of time.
-
--- Unfortunately, it is not possible to achieve dynamic discovery 
--- of parties in DAML. The query function expects a specific party
--- as an argument to determine the visibility of contracts. You 
--- cannot dynamically retrieve contracts across all parties without 
--- explicitly specifying them.
-
--- If you need to discover parties dynamically, you may consider 
--- an alternative approach such as maintaining a separate registry 
--- or creating an additional contract that keeps track of the 
--- parties participating in the network.
