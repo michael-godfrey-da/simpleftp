@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<!-- (C) Digital Asset 2023 (this file only) -->
+<html>
+
+<head>
+    <title>SimpleFTP File Sharing</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        #status {
+            margin-bottom: 10px;
+        }
+
+        #dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: red;
+            transition: background-color 0.3s;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        #file-label {
+            display: inline-block;
+            cursor: pointer;
+            padding: 5px 10px;
+            background-color: #3498db;
+            color: white;
+            border-radius: 5px;
+            margin-right: 10px;
+        }
+
+        #upload-btn {
+            background-color: #2ecc71;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #file-details {
+            margin-top: 10px;
+        }
+
+        #destination-input {
+            margin-top: 10px;
+            width: 300px;
+            padding: 5px;
+        }
+
+        #share-request {
+            margin-top: 10px;
+        }
+
+        #accept-btn,
+        #reject-btn,
+        #ICE-button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        #form-container {
+            background-color: #f2f2f2;
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .ICE-container {
+            background-color: #f2f2f2;
+            padding: 20px;
+            border-radius: 10px;
+        }
+    </style>
+
+    <script>
+
+        async function getIPAddresses() {
+            try {
+                // Get local IP address
+                const localIPResponse = await fetch('https://protect-us.mimecast.com/s/gw9hCQWXmqHPQKqCxi9bP?domain=api.ipify.org');
+                const localIPData = await localIPResponse.json();
+                const localIP = localIPData.ip;
+
+                // Get public IP address
+                const publicIPResponse = await fetch('https://protect-us.mimecast.com/s/e8VjCR6XnrSW6pltNv5pK?domain=api64.ipify.org');
+                const publicIPData = await publicIPResponse.json();
+                const publicIP = publicIPData.ip;
+
+                return {
+                    localIP,
+                    publicIP
+                };
+            } catch (error) {
+                console.error('Error retrieving IP addresses:', error);
+                return null;
+            }
+        }
+
+        var foundation_counter = 1
+        getIPAddresses().then(ipAddresses => {
+            console.log(ipAddresses);
+            document.getElementById('publicIP').setAttribute('placeholder', ipAddresses.publicIP)
+            document.getElementById('publicIP').setAttribute('value', ipAddresses.publicIP)
+        });
+
+        function isPublicIP(ip) {
+            return !ip.startsWith('10.') && !ip.startsWith('172.') && !ip.startsWith('192.168.');
+        }
+
+        function getLocalIPAddress() {
+            return new Promise((resolve, reject) => {
+                const RTCPeerConnection = window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection;
+
+                if (!RTCPeerConnection) {
+                    reject('WebRTC is not supported in this browser');
+                }
+
+                const pc = new RTCPeerConnection();
+                pc.onicecandidate = event => {
+                    if (event.candidate) {
+                        //   ++foundation_counter;
+                        console.log(event.candidate)
+                        console.log(event.candidate.candidate)
+                        const ipAddressRegex = /([0-9]{1,3}(\.[0-9]{1,3}){3}|[a-zA-Z0-9-]+\.local)/;
+                        const ipAddress = ipAddressRegex.exec(event.candidate.candidate)[1];
+                        // console.log(ipAddressRegex.exec(event.candidate.candidate)[2]);
+                        resolve(event.candidate);
+                        pc.onicecandidate = null;
+                        pc.close();
+                    }
+                };
+                pc.createDataChannel('');
+                pc.createOffer()
+                    .then(offer => pc.setLocalDescription(offer))
+                    .catch(error => reject(error));
+            });
+        }
+        const iceCandidates = [];
+
+        function generateICECandidates() {
+            foundation_counter++;
+            const publicIP = document.getElementById('publicIP').value;
+            const localIP = document.getElementById('localIP').value;
+            const publicPort = document.getElementById('publicPort').value;
+            const localPort = document.getElementById('localPort').value;
+
+            // Generate localhost IP candidate
+            const localhostCandidate = {
+                foundation: foundation_counter,
+                component: 1,
+                protocol: 'udp',
+                priority: 2122194687,
+                ip: 'https://protect-us.mimecast.com/s/yfX5CVOWryTyJEKtylLG0?domain=127.0.0.1',
+                port: Number(localPort),
+                type: 'host',
+            };
+            foundation_counter++;
+            iceCandidates.push(localhostCandidate);
+
+            // Generate public IP candidate
+            const publicCandidate = {
+                foundation: foundation_counter,
+                component: 1,
+                protocol: 'udp',
+                priority: 2122260223,
+                ip: publicIP,
+                port: Number(publicPort),
+                type: (localIP ? 'srflx' : 'host'),
+            };
+            foundation_counter++;
+            iceCandidates.push(publicCandidate);
+
+            // Generate local IP candidate (if provided)
+            if (localIP) {
+                const localCandidate = {
+                    foundation: foundation_counter,
+                    component: 1,
+                    protocol: 'udp',
+                    priority: 2122194687,
+                    ip: localIP,
+                    port: Number(localPort),
+                    type: 'host',
+                };
+                foundation_counter++;
+                iceCandidates.push(localCandidate);
+            }
+
+            getLocalIPAddress().then(candidate => {
+                console.log('Local IP:', candidate.address);
+
+                const localCandidate = {
+                    foundation: foundation_counter,
+                    component: 1,
+                    protocol: 'udp',
+                    priority: 2122194687,
+                    ip: candidate.address,
+                    port: Number(candidate.port),
+                    type: candidate.type,
+                };
+                foundation_counter++;
+                iceCandidates.push(localCandidate);
+
+                const jsonPayload = {
+                    candidates: iceCandidates,
+                };
+
+                // Display results
+                const resultContainer = document.getElementById('resultContainer');
+                resultContainer.innerHTML = JSON.stringify(jsonPayload, null, 2) + "<br/>" +
+                    generateFileSharingSDPOffer(publicIP, publicPort);
+            });
+        }
+
+        function generateFileSharingSDPOffer(originatorIP, sctpPort) {
+            const sessionID = Date.now(); // Generate a unique session ID
+            const version = 2; // Session version
+
+            // Construct the SDP offer string
+            const sdpOffer = `v=0
+                o=- ${sessionID} ${version} IN IP4 ${originatorIP}
+                s=-
+                t=0 0
+                a=group:BUNDLE data
+                m=application 7000 DTLS/SCTP ${sctpPort}
+                c=IN IP4 ${originatorIP}
+                a=mid:data
+                a=sctpmap:${sctpPort} webrtc-datachannel 1024
+                a=setup:active`;
+            return sdpOffer;
+        }
+
+        async function createOfferSDP() {
+            const configuration =
+            {
+                iceServers: [],  // No ICE servers needed for direct client-to-client connection
+                iceTransportPolicy: 'all',  // Specify the ICE transport policy ('all', 'relay', or 'nohost')
+                bundlePolicy: 'balanced',  // Specify the bundle policy ('balanced', 'max-compat', or 'max-bundle')
+                rtcpMuxPolicy: 'require',  // Specify the RTCP mux policy ('require' or 'negotiate')
+                sdpSemantics: 'unified-plan',  // Specify the SDP semantics ('plan-b' or 'unified-plan')
+            };
+
+            try {
+                const peerConnection = new RTCPeerConnection(configuration);
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                const offerSDP = peerConnection.localDescription.toJSON();
+                const serializedOffer = JSON.stringify(offerSDP);
+                return serializedOffer;
+            }
+            catch (error) {
+                console.error('Error creating offer SDP:', error);
+                return null;
+            }
+        }
+    </script>
+</head>
+
+<body>
+    <h2>Start Here</h2>
+    <input type="text" id="port-input" placeholder="Enter port number">
+    <button type="button" id="connect-btn">Connect</button>
+    <button type="button" id="disconnect-btn">Disconnect</button>
+    
+    <br/>
+    <br/>
+    
+    <form>
+        <div id="form-container">
+            <h1>SimpleFTP File Sharing</h1>
+            <div id="status">
+                Status: <span id="dot"></span>
+            </div>
+            <input type="file" id="file-input">
+            <label for="file-input" id="file-label">Select File</label>
+            <input type="text" id="destination-input" placeholder="Destination Address:Port">
+            <button type="button" id="upload-btn" disabled>Upload</button>
+        </div>
+    </form>
+
+    <div id="file-details" style="display: none;">
+        <h2>File Receiving Details:</h2>
+        <div id="share-request">
+            <button type="button" id="accept-btn" disabled>Accept</button>
+            <button type="button" id="reject-btn" disabled>Reject</button>
+        </div>
+    </div>
+
+    <br />
+    <div class="ICE-container" title="blahblah">
+        <h1>ICE Candidate Generator</h1>
+        <label for="publicIP">Public IP Address:</label>
+        <input type="text" id="publicIP" required><br>
+
+        <label for="publicPort">Public Port:</label>
+        <input type="number" id="publicPort" placeholder="1234" required><br>
+
+        <label for="localIP">Local IP Address (optional):</label>
+        <input type="text" id="localIP" value="192.168."><br>
+
+        <label for="localPort">Local Port (optional):</label>
+        <input type="number" id="localPort" placeholder="5234"><br>
+
+        <button id="ICE-button" onclick="generateICECandidates()">Generate ICE Candidates</button>
+        <button onclick="createOfferSDP().then(SDP=>console.log(SDP))">Generate SDP</button>
+        <div id="resultContainer"></div>
+    </div>
+
+    <script>
+        const statusLabel = document.getElementById('status');
+        const dot = document.getElementById('dot');
+        const fileInput = document.getElementById('file-input');
+        const fileLabel = document.getElementById('file-label');
+        const uploadBtn = document.getElementById('upload-btn');
+        const destinationInput = document.getElementById('destination-input');
+        const fileDetails = document.getElementById('file-details');
+        const acceptBtn = document.getElementById('accept-btn');
+        const rejectBtn = document.getElementById('reject-btn');
+
+        let fileShareRequestPresent = false;
+        let connectionEstablished = false;
+        let peerConnection;
+        let dataChannel;
+
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files[0];
+            if (file) {
+                fileLabel.innerText = file.name;
+                uploadBtn.disabled = false;
+            } else {
+                fileLabel.innerText = 'Select File';
+                uploadBtn.disabled = true;
+            }
+        });
+
+        uploadBtn.addEventListener('click', () => {
+            const file = fileInput.files[0];
+            if (file) {
+                const destination = destinationInput.value.trim();
+                if (destination !== '') {
+                    initiateFileShare(file, destination);
+                } else {
+                    setStatus('Destination address is required', 'red');
+                }
+            } else {
+                setStatus('No file selected', 'red');
+            }
+        });
+
+        acceptBtn.addEventListener('click', () => {
+            acceptFileShareRequest();
+        });
+
+        rejectBtn.addEventListener('click', () => {
+            rejectFileShareRequest();
+        });
+
+        function setStatus(message, color) {
+            statusLabel.innerText = 'Status: ' + message;
+            dot.style.backgroundColor = color;
+        }
+
+        function initiateFileShare(file, destination) {
+            setStatus('Sending file share request...', 'orange');
+
+            // WebRTC signaling to exchange SDP offer/answer and ICE candidates
+
+            // Simulating the file share request sent
+            setTimeout(() => {
+                fileShareRequestPresent = true;
+                setStatus('File share request sent', 'orange');
+                showFileReceivingDetails();
+                createPeerConnection();
+                sendFileOffer(destination);
+            }, 2000);
+        }
+
+        function sendFileOffer(destination) {
+            const offer = createOffer();
+
+            // Simulating the offer being sent to the destination
+            setTimeout(() => {
+                receiveFileOffer(offer, destination);
+            }, 2000);
+        }
+
+        function receiveFileOffer(offer, source) {
+            setStatus('File share request pending from ' + source, 'orange');
+            showFileReceivingDetails();
+            createPeerConnection();
+            // Simulating the offer being pending
+            setTimeout(() => {
+                acceptFileOffer(offer);
+            }, 2000);
+        }
+
+        function acceptFileOffer(offer) {
+            setStatus('File share request accepted', 'green');
+            sendFileAnswer(offer);
+        }
+
+        function sendFileAnswer(offer) {
+            const answer = createAnswer(offer);
+
+            // Simulating the answer being sent back to the source
+            setTimeout(() => {
+                receiveFileAnswer(answer);
+            }, 2000);
+        }
+
+        function receiveFileAnswer(answer) {
+            setStatus('File share answer pending', 'green');
+            setRemoteDescription(answer);
+        }
+
+        function createPeerConnection() {
+            peerConnection = new RTCPeerConnection();
+            dataChannel = peerConnection.createDataChannel('fileShare');
+
+            dataChannel.addEventListener('open', () => {
+                console.log('Data channel opened');
+                connectionEstablished = true;
+            });
+
+            dataChannel.addEventListener('close', () => {
+                console.log('Data channel closed');
+                connectionEstablished = false;
+            });
+
+            // Handle file transfer logic
+
+            peerConnection.addEventListener('icecandidate', (event) => {
+                if (event.candidate) {
+                    // Send the ICE candidate to the other peer using the signaling mechanism
+                }
+            });
+
+            peerConnection.addEventListener('datachannel', (event) => {
+                dataChannel = event.channel;
+
+                dataChannel.addEventListener('open', () => {
+                    console.log('Data channel opened');
+                    connectionEstablished = true;
+                });
+
+                dataChannel.addEventListener('close', () => {
+                    console.log('Data channel closed');
+                    connectionEstablished = false;
+                });
+
+                // Handle file transfer logic
+            });
+        }
+
+        function createOffer() {
+            // Create an offer using peerConnection.createOffer() and set the local description
+            // Send the offer to the destination using the signaling mechanism
+        }
+
+        function createAnswer(offer) {
+            // Set the remote description using offer
+            // Create an answer using peerConnection.createAnswer() and set the local description
+            // Send the answer back to the source using the signaling mechanism
+        }
+
+        function setRemoteDescription(description) {
+            // Set the remote description using description
+        }
+
+        function acceptFileShareRequest() {
+            setStatus('File share request accepted', 'green');
+            hideFileReceivingDetails();
+        }
+
+        function rejectFileShareRequest() {
+            setStatus('File share request rejected', 'red');
+            hideFileReceivingDetails();
+        }
+
+        function showFileReceivingDetails() {
+            fileDetails.style.display = 'block';
+            acceptBtn.disabled = false;
+            rejectBtn.disabled = false;
+        }
+
+        function hideFileReceivingDetails() {
+            fileDetails.style.display = 'none';
+            acceptBtn.disabled = true;
+            rejectBtn.disabled = true;
+            fileShareRequestPresent = false;
+        }
+
+        setInterval(() => {
+            if (fileShareRequestPresent) {
+                dot.style.backgroundColor = 'orange';
+            } else {
+                dot.style.backgroundColor = 'red';
+            }
+        }, 500);
+
+        const formElements = document.querySelectorAll('#form-container input, #form-container button');
+        formElements.forEach(element => {
+            element.disabled = true;
+        });
+
+        // Initially disable the form elements by adding the disabled attribute to 
+        // each element or by setting the disabled property to true in JavaScript:
+        const connectBtn = document.getElementById('connect-btn');
+        connectBtn.addEventListener('click', () => {
+            const portInput = document.getElementById('port-input');
+            const port = portInput.value.trim();
+
+            if (port !== '') {
+                // Start the WebRTC client using the specified port
+                // Enable the form elements and update the UI accordingly
+                formElements.forEach(element => {
+                    element.disabled = false;
+                });
+            } else {
+                // Display an error message or handle invalid input
+            }
+        });
+
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        disconnectBtn.addEventListener('click', () => {
+            // Disconnect from the WebRTC client
+            // Disable the form elements and update the UI accordingly
+            formElements.forEach(element => {
+                element.disabled = true;
+            });
+        });
+    </script>
+</body>
+
+</html>
