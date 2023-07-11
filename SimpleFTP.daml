@@ -1,0 +1,281 @@
+module SimpleFTP where
+import Daml.Script
+
+-- data TaskRequest_ENUM = 
+--     RequestorToSend | RequestorToRecv
+--     deriving (Enum, Show, Eq)
+
+data TaskResult_ENUM = 
+    Complete| NotComplete | Finalizing | Rejected | Cancelled | Error
+    deriving (Enum, Show, Eq)
+
+template Client
+    with 
+        user : Party
+        icelist : [Text]
+    where 
+        signatory user
+        choice CreateOffer : ContractId TaskProposal
+            -- 
+            -- Creates TaskProposal to send a file to a counterparty 
+            --------------------------------------------------------
+            with
+                request_recv_client : Client
+                request_filename : Text
+                request_filesz_kb : Int
+            controller user
+            do create TaskProposal
+                with
+                    creator = user
+                    originator = this
+                    counterparty = request_recv_client
+                    filename = request_filename
+                    filesz_kb = request_filesz_kb
+        
+template TaskProposal
+    with
+        creator : Party
+        originator : Client
+        counterparty : Client
+        filename : Text
+        filesz_kb : Int
+    where 
+        signatory originator.user
+        
+        choice Accept : ContractId TransferTask
+            controller counterparty.user
+            do
+                create TransferTask
+                    with
+                        send_client = originator
+                        recv_client = counterparty
+                        listening = False
+                        initialized = False
+                        sending_confirmed = False
+                        receiving_confirmed = False
+                        result = NotComplete
+                        result_reason = "(new)"
+
+        choice TaskProposal_Reject : ContractId TransferTask
+            with
+                reject_reason : Text
+            controller counterparty.user
+            do
+                create TransferTask
+                    with
+                        send_client = originator
+                        recv_client = counterparty
+                        listening = False
+                        initialized = False
+                        sending_confirmed = False
+                        receiving_confirmed = False
+                        result = Rejected
+                        result_reason = reject_reason
+
+        choice TaskProposal_Cancel : ContractId TransferTask
+            with
+                cancel_reason : Text
+            controller originator.user
+            do
+                create TransferTask
+                    with
+                        send_client = originator
+                        recv_client = counterparty
+                        listening = False
+                        initialized = False
+                        sending_confirmed = False
+                        receiving_confirmed = False
+                        result = Cancelled
+                        result_reason = cancel_reason
+
+template TransferTask
+    with
+        send_client : Client
+        recv_client : Client
+        listening : Bool
+        initialized : Bool
+        sending_confirmed : Bool
+        receiving_confirmed : Bool
+        result : TaskResult_ENUM
+        result_reason : Text
+    where
+        signatory send_client.user
+        choice Listen : ContractId TransferTask
+            controller recv_client.user
+            do
+                create this with 
+                    listening = True
+        choice Initialize : ContractId TransferTask
+            controller send_client.user
+            do
+                assertMsg ("Receiving Counterparty not listening") (listening)
+                create this with initialized = True
+
+        choice NotifySending : ContractId TransferTask 
+            controller send_client.user
+            do
+                assertMsg ("Sending Originator not initialized") (initialized)
+                create this with sending_confirmed = True
+        choice NotifyReceiving : ContractId TransferTask
+            controller recv_client.user
+            do
+                create this with receiving_confirmed = True
+        choice NotifySendingComplete : ContractId TransferTask
+            controller send_client.user
+            do
+                create this with 
+                    sending_confirmed = True
+                    result = (if receiving_confirmed then Complete else Finalizing)
+        choice NotifyReceivingComplete : ContractId TransferTask
+            controller recv_client.user
+            do
+                create this with 
+                    receiving_confirmed = True
+                    result = (if sending_confirmed then Complete else Finalizing)
+
+setup = script do
+    let sTAG = "[SETUP]"
+    party_a <- allocateParty "Party A"
+    party_b <- allocateParty "Party B"
+    party_c <- allocateParty "Party C"
+
+    debug "==================================="
+    debug "[SETUP] Step 1:"
+    debug "-----------------------------------"
+    debug "Creating 3 Clients (A,B,C)"
+    debug "..................................."
+    debug ""
+    debug ""
+    client_a <- submit party_a do 
+        createCmd Client with 
+            user = party_a
+            icelist = ["localhost:9090", "0.0.0.0:9090"]
+
+    client_b <- submit party_b do 
+        createCmd Client with 
+            user = party_b
+            icelist = ["localhost:9091", "0.0.0.0:9091"]
+
+    client_c <- submit party_c do 
+        createCmd Client with 
+            user = party_c
+            icelist = ["localhost:9092", "0.0.0.0:9092"]
+
+    debug "==================================="
+    debug "[SETUP] Step 2:"
+    debug "-----------------------------------"
+    debug "Gathering Peers (hard-coded)"
+    debug "..................................."
+    debug ""
+    debug ""
+    -- FIXME: Hardcoding parties (i.e. no dynamic peer discovery) 
+    -- (*[BLAHBLAHBLAH])
+    peers <- queryFilter @Client [party_a, party_b, party_c] (const True)
+    debug peers
+
+    debug "==================================="
+    debug "[SETUP] Step 3:"
+    debug "-----------------------------------"
+    debug "Creating 2 TaskProposals (A->B, A->C)"
+    debug "..................................."
+    debug ""
+    debug ""
+    clientA <- queryContractId party_a client_a
+    clientB <- queryContractId party_b client_b
+    clientC <- queryContractId party_c client_c
+    case clientA of
+        Some clientA -> do
+            case clientB of
+                Some clientB -> do
+                    case clientC of
+                        Some clientC -> do
+
+                            debug clientA
+                            debug clientB
+                            debug clientC
+
+                            task_proposal_ab <- submit party_a do 
+                                createCmd TaskProposal with 
+                                    creator = party_a
+                                    originator = clientA
+                                    counterparty = clientB
+                                    filename = "filename"
+                                    filesz_kb = 144
+
+                            task_proposal_ac <- submit party_a do 
+                                createCmd TaskProposal with 
+                                    creator = party_a
+                                    originator = clientA
+                                    counterparty = clientC
+                                    filename = "filename"
+                                    filesz_kb = 144
+                            pure()
+                        None -> do
+                            error "bad news"
+                None -> do
+                    error "bad news"
+        None -> do
+            error "bad news"
+
+    debug "==================================="
+    debug "[SETUP] Step 4:"
+    debug "-----------------------------------"
+    debug "Rejecting One Task Proposal, Accepting the Other"
+    debug "'Accept' creates a new TransferTask"
+    debug "..................................."
+    debug ""
+    debug ""
+
+    debug "==================================="
+    debug "[SETUP] Step 5:"
+    debug "-----------------------------------"
+    debug "Notify TransferTask Listening and Initialized"
+    debug ""
+    debug "..................................."
+    debug ""
+    debug ""
+
+    debug "==================================="
+    debug "[SETUP] Step 6:"
+    debug "-----------------------------------"
+    debug "Notify TransferTask Sending and Receiving"
+    debug ""
+    debug "..................................."
+    debug ""
+    debug ""
+
+
+    debug "==================================="
+    debug "[SETUP] Step 7:"
+    debug "-----------------------------------"
+    debug "Record TransferTask Sending and Receiving"
+    debug "    completion status"
+    debug "..................................."
+    debug ""
+    debug ""
+
+    pure()
+
+-- *[BLAHBLAHBLAH]
+-- 
+-- TODO: Will need to exchange contract keys for client0
+-- TODO: Select an easy to reproduce contract key
+-- 
+-- Rationale (Leaning on ChatGPT way too much):
+-- ____
+-- The query function requires the party on which the contracts 
+-- are visible to be explicitly provided. However, in your case,
+-- you want to perform discovery by querying for all peers from 
+-- ClientA, which means you do not know the complete set of 
+-- parties ahead of time.
+
+-- Unfortunately, it is not possible to achieve dynamic discovery 
+-- of parties in DAML. The query function expects a specific party
+-- as an argument to determine the visibility of contracts. You 
+-- cannot dynamically retrieve contracts across all parties without 
+-- explicitly specifying them.
+
+-- If you need to discover parties dynamically, you may consider 
+-- an alternative approach such as maintaining a separate registry 
+-- or creating an additional contract that keeps track of the 
+-- parties participating in the network.
