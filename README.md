@@ -1,11 +1,12 @@
 # SimpleFTP
 ## Canton Ledger Facilitated File Transfer
 
-![Context Diagram for SimpleFTP](image.png)
+![HTML UI for SimpleFTP](html1.png)
 
 ### What it does
 - Uses a Canton ledger to broker a WebRTC connection from one client to another
 - Uses that connection to send a file
+
 
 ### What it does not do
 - Peer Discovery
@@ -26,7 +27,11 @@
             or creating an additional contract that keeps track of the 
             parties participating in the network.
 
+### Participant Nodes Context Diagram
+![Context Diagram for SimpleFTP](image.png)
+
 ### SimpleFTP.daml
+
 - `data TaskResult_ENUM`
     - Data class enumerating possible SimpleFTP TransferTask outcomes
     - i.e. 
