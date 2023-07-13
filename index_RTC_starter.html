@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<!-- (C) Digital Asset 2023 -->
+<html>
+
+<head>
+    <title>Client</title>
+    </head>
+    <body>
+        <h1>webrtc local</h1>
+        
+        <h2>Zap Log</h2>
+        <div id="zap_log"> </div>
+        <div style="display:flex">
+            <div id="alice_zip_log" style="display: block; width: 45%; border: 1 1 solid;"> 
+                <h3>alice zip log</h3>
+            </div>
+            <div id="bob_zip_log" style="display: block; width: 45%; border: 1 1 solid;"> 
+                <h3>bob zip log</h3>
+            </div>
+        </div>
+    <script>
+
+        async function takeAndWait(thing, wait_ms){
+            await ((milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds)))(wait_ms);
+            return thing;
+        }
+
+        var LOG_IDX = 0
+        const is_string = (x)=>Object.prototype.toString.call(x) === "[object String]"
+        const get_logger=(log_id, prefix)=>(msg)=>{ const log_row = document.createElement("p"); log_row.innerHTML = (++LOG_IDX) +" [" +prefix+ "]: "+ (is_string(msg) ? msg : JSON.stringify(msg)); document.getElementById(log_id).appendChild(log_row); return msg;}
+        const ZAP_LOG=get_logger("zap_log", "ZAP")
+        const ZIP_LOG_ALICE=get_logger("alice_zip_log", "ALC")
+        const ZIP_LOG_BOB=get_logger("bob_zip_log","BOB")
+        
+        const RELIABLE_STUN = "stun:stun.l.google.com:19302";
+        const base_ice_servers = [{urls:RELIABLE_STUN}]
+        
+        const ZAP_LIST = []
+        
+        const peerZap = new RTCPeerConnection({iceServers:base_ice_servers});
+        const alice = new RTCPeerConnection({iceServers:base_ice_servers});
+        const bob = new RTCPeerConnection();
+        
+        peerZap.onicecandidate = function (event) {
+            if (event.candidate){
+                ZAP_LOG(" ZAP!");
+                ZAP_LOG(event.candidate.candidate);
+                ZAP_LIST.push(event.candidate.candidate)
+            } else {
+                ZAP_LOG(" zip!");
+                ZAP_LOG(JSON.stringify(event));
+            }
+        }
+        peerZap.createDataChannel("zap");
+        peerZap.createOffer()
+            .then(offer=>peerZap.setLocalDescription(new RTCSessionDescription(offer)))
+            .then(()=>ZAP_LOG("zap offer: "+peerZap.localDescription.sdp));
+
+        function NotifyAnswerReady(localDescription){
+            ZIP_LOG_ALICE("NotifyAnswerReady: Alice recv'd answer with localDescription:");
+            ZIP_LOG_ALICE(localDescription);
+            alice.setRemoteDescription(localDescription);
+        }
+
+        function NotifyOfferReady(localDescription){
+            ZIP_LOG_BOB("NotifyOfferReady: Bob recv'd offer with localDescription:");
+            ZIP_LOG_BOB(localDescription);
+            bob.setRemoteDescription(localDescription)
+                .then(()=>ZIP_LOG_BOB("bob creating answer..."))
+                .then(()=>bob.createAnswer())
+                .then(answer=>ZIP_LOG_BOB(answer))
+                .then(answer=>bob.setLocalDescription(new RTCSessionDescription(answer)))
+                .then(()=>NotifyAnswerReady(bob.localDescription));
+        }
+
+        ZIP_LOG_ALICE("Starting... <alice.createOffer()>")
+        setTimeout(function() {
+            
+            ZIP_LOG_ALICE(`length of ZAP_LIST: ${ZAP_LIST.length}`)
+            ZIP_LOG_ALICE("alice adding ZAP ice candidates: ")
+            ZAP_LIST.forEach(function(ic){
+                ZIP_LOG_ALICE(`Adding ZAP candidate`)
+                ZIP_LOG_ALICE(ic)
+                alice.addIceCandidate(ic)
+            })
+
+            ZIP_LOG_ALICE("alice adding ZAP ice candidates complete")
+            setTimeout(function() {
+                
+                alice.onicecandidate = function (event) {
+                    if (event.candidate){
+                        ZIP_LOG_ALICE(" (ALICE) ZAP!");
+                        ZIP_LOG_ALICE(event.candidate.candidate);
+                        ZAP_LIST.push(event.candidate.candidate)
+                    } else {
+                        ZAP_LOG(" (alice) zip!");
+                        ZAP_LOG(JSON.stringify(event));
+                    }
+                }
+            
+                alice.createDataChannel("MY_DATA");
+                alice.createOffer()
+                    .then(offer=>takeAndWait(offer, 500))
+                    .then(offer=>alice.setLocalDescription(new RTCSessionDescription(offer)))
+                    .then(()=>ZIP_LOG_ALICE(alice.localDescription))
+                    .then(()=>NotifyOfferReady(alice.localDescription));
+            }, 1000);
+        }, 1000);
+    </script>
+    </body>
+</html>
