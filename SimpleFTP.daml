@@ -27,6 +27,11 @@ template Client
                     counterparty = request_recv_client
                     filename = request_filename
                     filesz_kb = request_filesz_kb
+        nonconsuming choice CountIcelist : Int
+            controller user
+            do 
+                let result = foldl (\acc i -> acc + 1) 0 icelist;
+                return result;
         
 template TaskProposal
     with
@@ -50,6 +55,7 @@ template TaskProposal
                         initialized = False
                         sending_confirmed = False
                         receiving_confirmed = False
+                        memo = Some "Cancelled"
                         result = NotComplete
                         result_reason = "(new)"
 
@@ -66,6 +72,7 @@ template TaskProposal
                         initialized = False
                         sending_confirmed = False
                         receiving_confirmed = False
+                        memo = Some "Rejected"
                         result = Rejected
                         result_reason = reject_reason
 
@@ -82,6 +89,7 @@ template TaskProposal
                         initialized = False
                         sending_confirmed = False
                         receiving_confirmed = False
+                        memo = Some "Cancelled"
                         result = Cancelled
                         result_reason = cancel_reason
 
@@ -93,6 +101,7 @@ template TransferTask
         initialized : Bool
         sending_confirmed : Bool
         receiving_confirmed : Bool
+        memo : Optional Text
         result : TaskResult_ENUM
         result_reason : Text
     where
@@ -133,7 +142,401 @@ template TransferTask
                     result = (if sending_confirmed then Complete else Finalizing)
                     result_reason = (if sending_confirmed then "Complete" else "Finalizing")
 
-setup = script do
+scenario_propose_transfer_complete = script do
+    let sTAG = "[SCENARIO 1] Propose Transfer Complete"
+    party_a <- allocateParty "Party A"
+    party_b <- allocateParty "Party B"
+
+    debug "==================================="
+    debug "[SETUP] Step 1:"
+    debug "-----------------------------------"
+    debug "Creating 2 Clients (A,B)"
+    debug "..................................."
+    debug ""
+    debug ""
+    client_a <- submit party_a do 
+        createCmd Client with 
+            user = party_a
+            name = "[Client A]"
+            icelist = ["localhost:9090", "0.0.0.0:9090"]
+
+    client_b <- submit party_b do 
+        createCmd Client with 
+            user = party_b
+            name = "[Client B]"
+            icelist = ["localhost:9091", "0.0.0.0:9091"]
+
+    debug "==================================="
+    debug "[SETUP] Step 2:"
+    debug "-----------------------------------"
+    debug "Gathering Peers (hard-coded)"
+    debug "..................................."
+    debug ""
+    debug ""
+    peers <- queryFilter @Client [party_a, party_b] (const True)
+    debug peers
+
+    debug "==================================="
+    debug "[SETUP] Step 3:"
+    debug "-----------------------------------"
+    debug "Creating TaskProposals"
+    debug "..................................."
+    debug ""
+    debug ""
+    clientA <- queryContractId party_a client_a
+    clientB <- queryContractId party_b client_b
+
+    case clientA of
+        Some clientA -> do
+            case clientB of
+                Some clientB -> do
+                    
+                    debug clientA
+                    debug clientB
+
+                    task_proposal_ab <- submit party_a do 
+                        createCmd TaskProposal with 
+                            creator = party_a
+                            originator = clientA
+                            counterparty = clientB
+                            filename = "filename"
+                            filesz_kb = 144
+
+                    debug "==================================="
+                    debug "[SETUP] Step 4:"
+                    debug "-----------------------------------"
+                    debug "Rejecting One Task Proposal, Accepting the Other"
+                    debug "'Accept' creates a new TransferTask"
+                    debug "..................................."
+                    debug ""
+                    debug ""
+                    -- Test Accept (By Counterparty Only)
+                    transfer_task  <- submit party_b do exerciseCmd task_proposal_ab Accept
+
+                    debug "==================================="
+                    debug "[SETUP] Step 5:"
+                    debug "-----------------------------------"
+                    debug "Notify TransferTask Listening and Initialized"
+                    debug ""
+                    debug "..................................."
+                    debug ""
+                    debug ""
+                    transfer_task <- submit party_b do exerciseCmd transfer_task Listen
+                    transfer_task <- submit party_a do exerciseCmd transfer_task Initialize
+
+                    debug "==================================="
+                    debug "[SETUP] Step 6:"
+                    debug "-----------------------------------"
+                    debug "Notify TransferTask Sending and Receiving"
+                    debug ""
+                    debug "..................................."
+                    debug ""
+                    debug ""
+                    transfer_task <- submit party_a do exerciseCmd transfer_task NotifySending
+                    transfer_task <- submit party_b do exerciseCmd transfer_task NotifyReceiving
+
+                    debug "==================================="
+                    debug "[SETUP] Step 7:"
+                    debug "-----------------------------------"
+                    debug "Record TransferTask Sending and Receiving"
+                    debug "    completion status"
+                    debug "..................................."
+                    debug ""
+                    debug ""
+                    transfer_task <- submit party_a do exerciseCmd transfer_task NotifySendingComplete
+                    transfer_task <- submit party_b do exerciseCmd transfer_task NotifyReceivingComplete
+
+                    pure()
+
+                None -> do
+                    error "bad news"
+        None -> do
+            error "bad news"
+    pure()
+
+scenario_propose_transfer_recv_reject = script do
+        let sTAG = "[SCENARIO 2] Propose Transfer Recv Reject"
+        party_a <- allocateParty "Party A"
+        party_b <- allocateParty "Party B"
+        debug "==================================="
+        debug "[SETUP] Step 1:"
+        debug "-----------------------------------"
+        debug "Creating 2 Clients (A,B)"
+        debug "..................................."
+        debug ""
+        debug ""
+        client_a <- submit party_a do 
+            createCmd Client with 
+                user = party_a
+                name = "[Client A]"
+                icelist = ["localhost:9090", "0.0.0.0:9090"]
+        client_b <- submit party_b do 
+            createCmd Client with 
+                user = party_b
+                name = "[Client B]"
+                icelist = ["localhost:9091", "0.0.0.0:9091"]
+        debug "==================================="
+        debug "[SETUP] Step 2:"
+        debug "-----------------------------------"
+        debug "Gathering Peers (hard-coded)"
+        debug "..................................."
+        debug ""
+        debug ""
+        peers <- queryFilter @Client [party_a, party_b] (const True)
+        debug peers
+        debug "==================================="
+        debug "[SETUP] Step 3:"
+        debug "-----------------------------------"
+        debug "Creating 2 TaskProposals (A->B, A->C)"
+        debug "..................................."
+        debug ""
+        debug ""
+        clientA <- queryContractId party_a client_a
+        clientB <- queryContractId party_b client_b
+        case clientA of
+            Some clientA -> do
+                case clientB of
+                    Some clientB -> do
+                        debug clientA
+                        debug clientB
+                        task_proposal_ab <- submit party_a do 
+                            createCmd TaskProposal with 
+                                creator = party_a
+                                originator = clientA
+                                counterparty = clientB
+                                filename = "filename"
+                                filesz_kb = 144
+                        debug "==================================="
+                        debug "[SETUP] Step 4:"
+                        debug "-----------------------------------"
+                        debug "Rejecting One Task Proposal, Accepting the Other"
+                        debug "'Accept' creates a new TransferTask"
+                        debug "..................................."
+                        debug ""
+                        debug ""
+                        transfer_task <- submit party_b do exerciseCmd task_proposal_ab Reject with {reject_reason="Rejected!"}
+
+                        Some ttsk <- queryContractId party_b transfer_task
+                        assertMsg "Only Receiver May Reject" (ttsk.memo == Some "Rejected")
+                        pure()
+
+                        pure()
+                    None -> do
+                        error "bad news"
+            None -> do
+                error "bad news"
+        pure()
+
+scenario_propose_transfer_send_cancel = script do
+        let sTAG = "[SCENARIO 3] Propose Transfer Send Cancel"
+        party_a <- allocateParty "Party A"
+        party_b <- allocateParty "Party B"
+
+        debug "==================================="
+        debug "[SETUP] Step 1:"
+        debug "-----------------------------------"
+        debug "Creating 2 Clients (A,B)"
+        debug "..................................."
+        debug ""
+        debug ""
+        client_a <- submit party_a do 
+            createCmd Client with 
+                user = party_a
+                name = "[Client A]"
+                icelist = ["localhost:9090", "0.0.0.0:9090"]
+
+        client_b <- submit party_b do 
+            createCmd Client with 
+                user = party_b
+                name = "[Client B]"
+                icelist = ["localhost:9091", "0.0.0.0:9091"]
+
+        count <- submit party_b do exerciseCmd client_b CountIcelist 
+
+        assertMsg "Test CountIceList" ( count == 2)
+
+        debug "==================================="
+        debug "[SETUP] Step 2:"
+        debug "-----------------------------------"
+        debug "Gathering Peers (hard-coded)"
+        debug "..................................."
+        debug ""
+        debug ""
+        peers <- queryFilter @Client [party_a, party_b] (const True)
+        debug peers
+
+        debug "==================================="
+        debug "[SETUP] Step 3:"
+        debug "-----------------------------------"
+        debug "Creating TaskProposals"
+        debug "..................................."
+        debug ""
+        debug ""
+        clientA <- queryContractId party_a client_a
+        clientB <- queryContractId party_b client_b
+
+        case clientA of
+            Some clientA -> do
+                case clientB of
+                    Some clientB -> do
+                        
+                        debug clientA
+                        debug clientB
+
+                        task_proposal_ab <- submit party_a do 
+                            createCmd TaskProposal with 
+                                creator = party_a
+                                originator = clientA
+                                counterparty = clientB
+                                filename = "filename"
+                                filesz_kb = 144
+
+                        debug "==================================="
+                        debug "[SETUP] Step 4:"
+                        debug "-----------------------------------"
+                        debug "Rejecting One Task Proposal, Accepting the Other"
+                        debug "'Accept' creates a new TransferTask"
+                        debug "..................................."
+                        debug ""
+                        debug ""
+
+                        -- Test Cancel (By Sender Only)
+                        transfer_task <- submit party_a do exerciseCmd task_proposal_ab Cancel with {cancel_reason="Cancelled!"}
+
+                        Some ttsk <- queryContractId party_a transfer_task
+                        assertMsg "Only Sender May Cancel" (ttsk.memo == Some "Cancelled")
+                        pure()
+
+                    None -> do
+                        error "bad news"
+            None -> do
+                error "bad news"
+        pure()
+
+--     scenario_propose_transfer_send_cancel = script do
+--         --===============================================================================================================
+--         let sTAG = "[SCENARIO 3] Propose Transfer Send Reject"
+--         --===============================================================================================================
+--         party_a <- allocateParty "Party A"
+--         party_b <- allocateParty "Party B"
+
+--         debug "==================================="
+--         debug "[SETUP] Step 1:"
+--         debug "-----------------------------------"
+--         debug "Creating 2 Clients (A,B)"
+--         debug "..................................."
+--         debug ""
+--         debug ""
+--         client_a <- submit party_a do 
+--             createCmd Client with 
+--                 user = party_a
+--                 name = "[Client A]"
+--                 icelist = ["localhost:9090", "0.0.0.0:9090"]
+
+--         client_b <- submit party_b do 
+--             createCmd Client with 
+--                 user = party_b
+--                 name = "[Client B]"
+--                 icelist = ["localhost:9091", "0.0.0.0:9091"]
+
+--         debug "==================================="
+--         debug "[SETUP] Step 2:"
+--         debug "-----------------------------------"
+--         debug "Gathering Peers (hard-coded)"
+--         debug "..................................."
+--         debug ""
+--         debug ""
+--         peers <- queryFilter @Client [party_a, party_b] (const True)
+--         debug peers
+
+--         debug "==================================="
+--         debug "[SETUP] Step 3:"
+--         debug "-----------------------------------"
+--         debug "Creating TaskProposals
+--         debug "..................................."
+--         debug ""
+--         debug ""
+--         clientA <- queryContractId party_a client_a
+--         clientB <- queryContractId party_b client_b
+
+--         case clientA of
+--             Some clientA -> do
+--                 case clientB of
+--                     Some clientB -> do
+                        
+--                         debug clientA
+--                         debug clientB
+
+--                         task_proposal_ab <- submit party_a do 
+--                             createCmd TaskProposal with 
+--                                 creator = party_a
+--                                 originator = clientA
+--                                 counterparty = clientB
+--                                 filename = "filename"
+--                                 filesz_kb = 144
+
+--                         debug "==================================="
+--                         debug "[SETUP] Step 4:"
+--                         debug "-----------------------------------"
+--                         debug "Rejecting One Task Proposal, Accepting the Other"
+--                         debug "'Accept' creates a new TransferTask"
+--                         debug "..................................."
+--                         debug ""
+--                         debug ""
+--                         -- Test Accept (By Counterparty Only)
+--                         transfer_task  <- submit party_b do exerciseCmd task_proposal_ab Accept
+                        
+--                         -- Test Reject (By Counterparty Only)
+--                         transfer_task <- submitMustFail party_a do exerciseCmd task_proposal_ab Reject with {reject_reason="Rejected!"}
+--                         transfer_task <- submit party_c do exerciseCmd task_proposal_ab Reject with {reject_reason="Rejected!"}
+                        
+--                         -- Test Cancel (By Sender Only)
+--                         transfer_task <- submitMustFail party_d do exerciseCmd task_proposal_ab Cancel with {cancel_reason="Cancelled!"}
+--                         transfer_task <- submit party_a do exerciseCmd task_proposal_ab Cancel with {cancel_reason="Cancelled!"}
+
+--                         debug "==================================="
+--                         debug "[SETUP] Step 5:"
+--                         debug "-----------------------------------"
+--                         debug "Notify TransferTask Listening and Initialized"
+--                         debug ""
+--                         debug "..................................."
+--                         debug ""
+--                         debug ""
+--                         transfer_task1 <- submit party_b do exerciseCmd transfer_task1 Listen
+--                         transfer_task1 <- submit party_a do exerciseCmd transfer_task1 Initialize
+
+--                         debug "==================================="
+--                         debug "[SETUP] Step 6:"
+--                         debug "-----------------------------------"
+--                         debug "Notify TransferTask Sending and Receiving"
+--                         debug ""
+--                         debug "..................................."
+--                         debug ""
+--                         debug ""
+--                         transfer_task1 <- submit party_a do exerciseCmd transfer_task1 NotifySending
+--                         transfer_task1 <- submit party_b do exerciseCmd transfer_task1 NotifyReceiving
+
+--                         debug "==================================="
+--                         debug "[SETUP] Step 7:"
+--                         debug "-----------------------------------"
+--                         debug "Record TransferTask Sending and Receiving"
+--                         debug "    completion status"
+--                         debug "..................................."
+--                         debug ""
+--                         debug ""
+--                         transfer_task1 <- submit party_a do exerciseCmd transfer_task1 NotifySendingComplete
+--                         transfer_task1 <- submit party_b do exerciseCmd transfer_task1 NotifyReceivingComplete
+
+--                         pure()
+
+--                     None -> do
+--                         error "bad news"
+--             None -> do
+--                 error "bad news"
+--         pure()
+
+setup : Script ()
+setup = do
     let sTAG = "[SETUP]"
     party_a <- allocateParty "Party A"
     party_b <- allocateParty "Party B"
@@ -283,12 +686,16 @@ setup = script do
                                                     transfer_task5  <- submit party_f do exerciseCmd task_proposal_af Accept
                                                     
                                                     -- Test Reject (By Counterparty Only)
-                                                    transfer_task2 <- submitMustFail party_a do exerciseCmd task_proposal_ac Reject with {reject_reason="Rejected!"}
-                                                    transfer_task2 <- submit party_c do exerciseCmd task_proposal_ac Reject with {reject_reason="Rejected!"}
-                                                    
+                                                    transfer_task2 <- submitMustFail party_a do
+                                                        exerciseCmd task_proposal_ac Reject with {reject_reason="Rejected!"}
+                                                    transfer_task2 <- submit party_c do
+                                                        exerciseCmd task_proposal_ac Reject with {reject_reason="Rejected!"}
+
                                                     -- Test Cancel (By Sender Only)
-                                                    transfer_task3 <- submitMustFail party_d do exerciseCmd task_proposal_ad Cancel with {cancel_reason="Cancelled!"}
-                                                    transfer_task3 <- submit party_a do exerciseCmd task_proposal_ad Cancel with {cancel_reason="Cancelled!"}
+                                                    transfer_task3 <- submitMustFail party_d do
+                                                        exerciseCmd task_proposal_ad Cancel with {cancel_reason="Cancelled!"}
+                                                    transfer_task3 <- submit party_a do
+                                                        exerciseCmd task_proposal_ad Cancel with {cancel_reason="Cancelled!"}
 
                                                     debug "==================================="
                                                     debug "[SETUP] Step 5:"
@@ -298,12 +705,18 @@ setup = script do
                                                     debug "..................................."
                                                     debug ""
                                                     debug ""
-                                                    transfer_task1 <- submit party_b do exerciseCmd transfer_task1 Listen
-                                                    transfer_task1 <- submit party_a do exerciseCmd transfer_task1 Initialize
-                                                    transfer_task4 <- submit party_e do exerciseCmd transfer_task4 Listen
-                                                    transfer_task4 <- submit party_a do exerciseCmd transfer_task4 Initialize
-                                                    transfer_task5 <- submit party_f do exerciseCmd transfer_task5 Listen
-                                                    transfer_task5 <- submit party_a do exerciseCmd transfer_task5 Initialize
+                                                    transfer_task1 <- submit party_b do
+                                                        exerciseCmd transfer_task1 Listen
+                                                    transfer_task1 <- submit party_a do
+                                                        exerciseCmd transfer_task1 Initialize
+                                                    transfer_task4 <- submit party_e do
+                                                        exerciseCmd transfer_task4 Listen
+                                                    transfer_task4 <- submit party_a do
+                                                        exerciseCmd transfer_task4 Initialize
+                                                    transfer_task5 <- submit party_f do
+                                                        exerciseCmd transfer_task5 Listen
+                                                    transfer_task5 <- submit party_a do
+                                                        exerciseCmd transfer_task5 Initialize
 
                                                     debug "==================================="
                                                     debug "[SETUP] Step 6:"
@@ -313,12 +726,18 @@ setup = script do
                                                     debug "..................................."
                                                     debug ""
                                                     debug ""
-                                                    transfer_task1 <- submit party_a do exerciseCmd transfer_task1 NotifySending
-                                                    transfer_task1 <- submit party_b do exerciseCmd transfer_task1 NotifyReceiving
-                                                    transfer_task4 <- submit party_a do exerciseCmd transfer_task4 NotifySending
-                                                    transfer_task4 <- submit party_e do exerciseCmd transfer_task4 NotifyReceiving
-                                                    transfer_task5 <- submit party_a do exerciseCmd transfer_task5 NotifySending
-                                                    transfer_task5 <- submit party_f do exerciseCmd transfer_task5 NotifyReceiving
+                                                    transfer_task1 <- submit party_a do
+                                                        exerciseCmd transfer_task1 NotifySending
+                                                    transfer_task1 <- submit party_b do
+                                                        exerciseCmd transfer_task1 NotifyReceiving
+                                                    transfer_task4 <- submit party_a do
+                                                        exerciseCmd transfer_task4 NotifySending
+                                                    transfer_task4 <- submit party_e do
+                                                        exerciseCmd transfer_task4 NotifyReceiving
+                                                    transfer_task5 <- submit party_a do
+                                                        exerciseCmd transfer_task5 NotifySending
+                                                    transfer_task5 <- submit party_f do
+                                                        exerciseCmd transfer_task5 NotifyReceiving
 
                                                     debug "==================================="
                                                     debug "[SETUP] Step 7:"
@@ -328,12 +747,18 @@ setup = script do
                                                     debug "..................................."
                                                     debug ""
                                                     debug ""
-                                                    transfer_task1 <- submit party_a do exerciseCmd transfer_task1 NotifySendingComplete
-                                                    transfer_task1 <- submit party_b do exerciseCmd transfer_task1 NotifyReceivingComplete
-                                                    transfer_task4 <- submit party_a do exerciseCmd transfer_task4 NotifySendingComplete
-                                                    transfer_task4 <- submit party_e do exerciseCmd transfer_task4 NotifyReceivingComplete
-                                                    transfer_task5 <- submit party_a do exerciseCmd transfer_task5 NotifySendingComplete
-                                                    transfer_task5 <- submit party_f do exerciseCmd transfer_task5 NotifyReceivingComplete
+                                                    transfer_task1 <- submit party_a do
+                                                        exerciseCmd transfer_task1 NotifySendingComplete
+                                                    transfer_task1 <- submit party_b do
+                                                        exerciseCmd transfer_task1 NotifyReceivingComplete
+                                                    transfer_task4 <- submit party_a do
+                                                        exerciseCmd transfer_task4 NotifySendingComplete
+                                                    transfer_task4 <- submit party_e do
+                                                        exerciseCmd transfer_task4 NotifyReceivingComplete
+                                                    transfer_task5 <- submit party_a do
+                                                        exerciseCmd transfer_task5 NotifySendingComplete
+                                                    transfer_task5 <- submit party_f do
+                                                        exerciseCmd transfer_task5 NotifyReceivingComplete
                                                     pure()
                                                 None -> do
                                                     error "bad news"
@@ -347,4 +772,3 @@ setup = script do
                     error "bad news"
         None -> do
             error "bad news"
-    pure()

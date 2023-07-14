@@ -52,12 +52,22 @@
 
 ![Example DAML Studio Output for SimpleFTP](output.png)
 
+## On-Deck Tasks
+<!-- 
+* Move Zap logic (early ICE discovery) to Client classes
+* Set Up DataChannel listeners 
+-->
+* Send/Receive Text
+* Make gRPC connectors
+
 ## Version History
 
 * (Version NEXT)
     - [2023-07-11]
         - Initial check-in
         - Setup script simulates happy path file transfer
+    - [2023-07-14]
+        - Implementing Rubrik Requirements
 
     - [Not Implemented] Test Reject a task proposal
     - [Not Implemented] Test Finalizing (i.e. NotifyReceivingComplete seen before NotifySendingComplete)
